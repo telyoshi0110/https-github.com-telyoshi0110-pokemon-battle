@@ -133,6 +133,11 @@ function normalizeSelectedMoves(moves: string[]): string[] {
     .slice(0, PARTY_MOVE_SLOTS);
 }
 
+function filterMovesByAvailable(moves: string[], availableMoves: string[]): string[] {
+  const availableSet = new Set(availableMoves);
+  return normalizeSelectedMoves(moves).filter((move) => availableSet.has(move));
+}
+
 function totalEvs(evs: StatBlock): number {
   return evs.hp + evs.atk + evs.def + evs.spa + evs.spd + evs.spe;
 }
@@ -332,7 +337,6 @@ function App() {
   const [damageResult, setDamageResult] = useState<DamageResult | null>(null);
   const [hitCount, setHitCount] = useState(1);
   const [pokemonOptions, setPokemonOptions] = useState<string[]>([]);
-  const [moveOptions, setMoveOptions] = useState<string[]>([]);
   const [attackerSaveLabel, setAttackerSaveLabel] = useState("");
   const [DefenderSaveLabel, setDefenderSaveLabel] = useState("");
   const [partySaveLabels, setPartySaveLabels] = useState<string[]>(
@@ -344,6 +348,9 @@ function App() {
   const [partyName, setPartyName] = useState("");
   const [partyMembers, setPartyMembers] = useState<PokemonInput[]>(
     Array.from({ length: 6 }, () => emptyPokemon())
+  );
+  const [partyMoveOptions, setPartyMoveOptions] = useState<string[][]>(
+    Array.from({ length: 6 }, () => [])
   );
   const [parties, setParties] = useState<Party[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -405,16 +412,12 @@ function App() {
         if (!res.ok) return;
         const data = (await res.json()) as Partial<JpNameMapFile>;
         const pokemonMap = data.p ?? data.pokemon ?? {};
-        const moveMap = data.m ?? data.move ?? {};
         const names = Object.keys(pokemonMap).sort((a, b) =>
           a.localeCompare(b, "ja")
         );
-        const moves = Object.keys(moveMap).sort((a, b) => a.localeCompare(b, "ja"));
         setPokemonOptions(names);
-        setMoveOptions(moves);
       } catch {
         setPokemonOptions([]);
-        setMoveOptions([]);
       }
     };
     void loadPokemonOptions();
@@ -474,7 +477,6 @@ function App() {
     () => savedPokemon.map((saved) => ({ id: saved.id, label: saved.label })),
     [savedPokemon]
   );
-  const moveOptionSet = useMemo(() => new Set(moveOptions), [moveOptions]);
   const latestSavedDamage = useMemo(
     () => savedDamages.find((entry) => entry.id === selectedSavedDamageId) ?? null,
     [savedDamages, selectedSavedDamageId]
@@ -657,7 +659,67 @@ function App() {
   const applySavedPokemonToPartyMember = (index: number, savedId: string) => {
     const selected = savedPokemon.find((saved) => saved.id === savedId);
     if (!selected) return;
-    updatePartyMember(index, normalizePokemonInput(selected.pokemon));
+    const normalized = normalizePokemonInput(selected.pokemon);
+    const availableMoves = Array.from(
+      new Set((normalized.moves ?? []).map((m) => m.trim()).filter(Boolean))
+    );
+    updatePartyMember(index, {
+      ...normalized,
+      moves: filterMovesByAvailable(normalized.moves, availableMoves),
+    });
+    setPartyMoveOptions((prev) =>
+      prev.map((moves, idx) =>
+        idx === index ? availableMoves : moves
+      )
+    );
+  };
+
+  const handleFetchPartyMember = async (index: number, inputName?: string) => {
+    const member = partyMembers[index];
+    if (!member) return;
+    const name = inputName?.trim() ?? member.name.trim();
+    if (!name) return;
+    setError(null);
+    setBusy(`party-${index}`);
+    try {
+      const fetched = await fetchPokemon(name);
+      const displayName = fetched.displayName?.trim() || fetched.name;
+      updatePartyMember(index, {
+        name: displayName,
+        displayName,
+        types: fetched.types,
+        stats: fetched.stats,
+        moves: (fetched.moves ?? []).slice(0, PARTY_MOVE_SLOTS),
+      });
+      setPartyMoveOptions((prev) =>
+        prev.map((moves, idx) =>
+          idx === index
+            ? Array.from(new Set((fetched.moves ?? []).map((m) => m.trim()).filter(Boolean)))
+            : moves
+        )
+      );
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handlePartyMemberNameInput = (index: number, value: string) => {
+    updatePartyMember(index, { name: value });
+    if (!value.trim()) {
+      updatePartyMember(index, { moves: [] });
+      setPartyMoveOptions((prev) => prev.map((moves, idx) => (idx === index ? [] : moves)));
+    }
+    if (pokemonOptionSet.has(value.trim())) {
+      void handleFetchPartyMember(index, value);
+    }
+  };
+
+  const handlePartyMemberNameCommit = (index: number) => {
+    const member = partyMembers[index];
+    if (!member?.name.trim()) return;
+    void handleFetchPartyMember(index, member.name);
   };
 
   const deleteSavedPokemon = (savedId: string) => {
@@ -734,14 +796,26 @@ function App() {
     setError(null);
     setPartyName("");
     setPartyMembers(Array.from({ length: 6 }, () => emptyPokemon()));
+    setPartyMoveOptions(Array.from({ length: 6 }, () => []));
     setPartySaveLabels(Array.from({ length: 6 }, () => ""));
   };
 
   const handleLoadParty = (party: Party) => {
+    const loadedMembers = Array.from(
+      { length: 6 },
+      (_, idx) => party.members[idx] ?? emptyPokemon()
+    );
+    const loadedMoveOptions = loadedMembers.map((member) =>
+      Array.from(new Set((member.moves ?? []).map((move) => move.trim()).filter(Boolean)))
+    );
     setPartyName(party.name);
     setPartyMembers(
-      Array.from({ length: 6 }, (_, idx) => party.members[idx] ?? emptyPokemon())
+      loadedMembers.map((member, idx) => ({
+        ...member,
+        moves: filterMovesByAvailable(member.moves ?? [], loadedMoveOptions[idx] ?? []),
+      }))
     );
+    setPartyMoveOptions(loadedMoveOptions);
     setPartySaveLabels(Array.from({ length: 6 }, () => ""));
     setTab("party");
   };
@@ -1565,15 +1639,39 @@ function App() {
               {partyMembers.map((member, idx) => {
                 const memberActual = calculateStats(member);
                 const memberSpeedMultiplier = getSpeedMultiplier(member.item);
+                const memberName = member.name.trim();
+                const memberSelectValue = pokemonOptionSet.has(memberName) ? member.name : "";
+                const availableMoves = partyMoveOptions[idx] ?? [];
                 return (
                   <div key={idx} className="party-card">
                   <div className="party-header">
                     <h3>#{idx + 1}</h3>
-                    <input
-                      value={member.name}
-                      onChange={(e) => updatePartyMember(idx, { name: e.target.value })}
-                      placeholder="ピカチュウ"
-                    />
+                    <div className="field" style={{ marginBottom: 0, width: "100%" }}>
+                      <input
+                        list="pokemon-name-options"
+                        value={member.name}
+                        onChange={(e) => handlePartyMemberNameInput(idx, e.target.value)}
+                        onBlur={() => handlePartyMemberNameCommit(idx)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handlePartyMemberNameCommit(idx);
+                          }
+                        }}
+                        placeholder="ポケモン名を検索"
+                      />
+                      <select
+                        value={memberSelectValue}
+                        onChange={(e) => handlePartyMemberNameInput(idx, e.target.value)}
+                      >
+                        <option value="">ドロップダウンから選択</option>
+                        {pokemonOptions.map((name) => (
+                          <option key={`${idx}-poke-${name}`} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                   <div className="field">
                     <label>保存済みポケモン呼び出し</label>
@@ -1854,23 +1952,30 @@ function App() {
                       <div className="inline-fields">
                         {Array.from({ length: PARTY_MOVE_SLOTS }, (_, slot) => {
                           const selectedMove = member.moves[slot] ?? "";
+                          const selectValue = availableMoves.includes(selectedMove)
+                            ? selectedMove
+                            : "";
                           return (
                             <div key={`party-move-${idx}-${slot}`}>
                               <label>技{slot + 1}</label>
                               <select
-                                value={selectedMove}
+                                value={selectValue}
                                 onChange={(e) =>
                                   updatePartyMemberMove(idx, slot, e.target.value)
                                 }
+                                disabled={availableMoves.length === 0}
                               >
-                                <option value="">選択なし</option>
-                                {selectedMove && !moveOptionSet.has(selectedMove) && (
-                                  <option value={selectedMove}>
-                                    {selectedMove}
-                                  </option>
-                                )}
-                                {moveOptions.map((option) => (
-                                  <option key={option} value={option}>
+                                <option value="">
+                                  {availableMoves.length === 0
+                                    ? "ポケモン選択後に候補表示"
+                                    : "ドロップダウンから選択"}
+                                </option>
+                                {selectedMove &&
+                                  !availableMoves.includes(selectedMove) && (
+                                    <option value={selectedMove}>{selectedMove}</option>
+                                  )}
+                                {availableMoves.map((option) => (
+                                  <option key={`${idx}-move-${slot}-${option}`} value={option}>
                                     {option}
                                   </option>
                                 ))}
