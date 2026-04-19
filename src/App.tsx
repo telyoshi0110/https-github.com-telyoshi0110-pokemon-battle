@@ -78,17 +78,6 @@ function formatDate(iso: string): string {
     .slice(0, 5)}`;
 }
 
-function toMoves(value: string): string[] {
-  return value
-    .split(",")
-    .map((m) => m.trim())
-    .filter(Boolean);
-}
-
-function movesToText(moves: string[]): string {
-  return moves.join(", ");
-}
-
 function cleanPokemon(pokemon: PokemonInput[]): PokemonInput[] {
   return pokemon.filter((p) => p.name.trim().length > 0);
 }
@@ -135,6 +124,14 @@ const EV_PRESETS: { label: string; values: Partial<StatBlock> }[] = [
 
 const MAX_STAT_POINT_PER_STAT = 32;
 const MAX_STAT_POINT_TOTAL = 66;
+const PARTY_MOVE_SLOTS = 4;
+
+function normalizeSelectedMoves(moves: string[]): string[] {
+  return moves
+    .map((move) => move.trim())
+    .filter(Boolean)
+    .slice(0, PARTY_MOVE_SLOTS);
+}
 
 function totalEvs(evs: StatBlock): number {
   return evs.hp + evs.atk + evs.def + evs.spa + evs.spd + evs.spe;
@@ -335,6 +332,7 @@ function App() {
   const [damageResult, setDamageResult] = useState<DamageResult | null>(null);
   const [hitCount, setHitCount] = useState(1);
   const [pokemonOptions, setPokemonOptions] = useState<string[]>([]);
+  const [moveOptions, setMoveOptions] = useState<string[]>([]);
   const [attackerSaveLabel, setAttackerSaveLabel] = useState("");
   const [DefenderSaveLabel, setDefenderSaveLabel] = useState("");
   const [partySaveLabels, setPartySaveLabels] = useState<string[]>(
@@ -407,12 +405,16 @@ function App() {
         if (!res.ok) return;
         const data = (await res.json()) as Partial<JpNameMapFile>;
         const pokemonMap = data.p ?? data.pokemon ?? {};
+        const moveMap = data.m ?? data.move ?? {};
         const names = Object.keys(pokemonMap).sort((a, b) =>
           a.localeCompare(b, "ja")
         );
+        const moves = Object.keys(moveMap).sort((a, b) => a.localeCompare(b, "ja"));
         setPokemonOptions(names);
+        setMoveOptions(moves);
       } catch {
         setPokemonOptions([]);
+        setMoveOptions([]);
       }
     };
     void loadPokemonOptions();
@@ -472,6 +474,7 @@ function App() {
     () => savedPokemon.map((saved) => ({ id: saved.id, label: saved.label })),
     [savedPokemon]
   );
+  const moveOptionSet = useMemo(() => new Set(moveOptions), [moveOptions]);
   const latestSavedDamage = useMemo(
     () => savedDamages.find((entry) => entry.id === selectedSavedDamageId) ?? null,
     [savedDamages, selectedSavedDamageId]
@@ -673,6 +676,20 @@ function App() {
     );
   };
 
+  const updatePartyMemberMove = (index: number, slot: number, value: string) => {
+    setPartyMembers((prev) =>
+      prev.map((member, idx) => {
+        if (idx !== index) return member;
+        const nextMoves = Array.from(
+          { length: PARTY_MOVE_SLOTS },
+          (_, i) => member.moves[i] ?? ""
+        );
+        nextMoves[slot] = value;
+        return { ...member, moves: nextMoves };
+      })
+    );
+  };
+
   const updatePartyStat = (
     index: number,
     key: keyof StatBlock,
@@ -688,7 +705,10 @@ function App() {
   };
 
   const handleSaveParty = () => {
-    const members = cleanPokemon(partyMembers);
+    const members = cleanPokemon(partyMembers).map((member) => ({
+      ...member,
+      moves: normalizeSelectedMoves(member.moves),
+    }));
     if (!partyName.trim() && members.length === 0) {
       setError("パーティ名かメンバーを入力してください");
       return;
@@ -703,6 +723,15 @@ function App() {
     setParties((prev) => [newParty, ...prev]);
     const updated = addLog(logs, "party", members, `パーティ保存: ${name}`);
     setLogs(updated);
+    const now = new Date().toISOString();
+    const autoSavedPokemon: SavedPokemon[] = members.map((member, index) => ({
+      id: crypto.randomUUID(),
+      label: `${name} #${index + 1} ${displayName(member)}`,
+      pokemon: normalizePokemonInput(member),
+      createdAt: now,
+    }));
+    setSavedPokemon((prev) => [...autoSavedPokemon, ...prev]);
+    setError(null);
     setPartyName("");
     setPartyMembers(Array.from({ length: 6 }, () => emptyPokemon()));
     setPartySaveLabels(Array.from({ length: 6 }, () => ""));
@@ -1821,14 +1850,35 @@ function App() {
                       </div>
                     </div>
                     <div className="field">
-                      <label>技（カンマ区切り）</label>
-                      <input
-                        value={movesToText(member.moves)}
-                        onChange={(e) =>
-                          updatePartyMember(idx, { moves: toMoves(e.target.value) })
-                        }
-                        placeholder="10まんボルト, ボルトチェンジ"
-                      />
+                      <label>技選択（4枠）</label>
+                      <div className="inline-fields">
+                        {Array.from({ length: PARTY_MOVE_SLOTS }, (_, slot) => {
+                          const selectedMove = member.moves[slot] ?? "";
+                          return (
+                            <div key={`party-move-${idx}-${slot}`}>
+                              <label>技{slot + 1}</label>
+                              <select
+                                value={selectedMove}
+                                onChange={(e) =>
+                                  updatePartyMemberMove(idx, slot, e.target.value)
+                                }
+                              >
+                                <option value="">選択なし</option>
+                                {selectedMove && !moveOptionSet.has(selectedMove) && (
+                                  <option value={selectedMove}>
+                                    {selectedMove}
+                                  </option>
+                                )}
+                                {moveOptions.map((option) => (
+                                  <option key={option} value={option}>
+                                    {option}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                     <div className="field">
                       <label>メモ</label>

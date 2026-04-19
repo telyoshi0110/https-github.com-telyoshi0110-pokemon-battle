@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "release": "node scripts/release.mjs",
     "generate:jp-map": "node scripts/generate-jp-name-map.mjs",
     "generate:offline-data": "node scripts/generate-offline-data.mjs"
   },
