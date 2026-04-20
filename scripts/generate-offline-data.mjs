@@ -161,6 +161,18 @@ async function main() {
         jpPokemonMap[normalizeJapaneseName(rotomFormJa[suffix])] = apiName;
       }
     }
+
+    if (suffix === "mega") {
+      const megaPart = parts[2] ?? "";
+      if (!megaPart) {
+        jpPokemonMap[normalizeJapaneseName(`メガ${baseJp}`)] = apiName;
+        jpPokemonMap[normalizeJapaneseName(`${baseJp}(メガ)`)] = apiName;
+      } else {
+        const megaCode = megaPart.toUpperCase();
+        jpPokemonMap[normalizeJapaneseName(`メガ${baseJp}${megaCode}`)] = apiName;
+        jpPokemonMap[normalizeJapaneseName(`${baseJp}(メガ${megaCode})`)] = apiName;
+      }
+    }
   }
 
   const typeSet = new Set();

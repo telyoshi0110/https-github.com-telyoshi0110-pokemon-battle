@@ -147,11 +147,6 @@ function clampEvValue(value: number): number {
   return Math.max(0, Math.min(MAX_STAT_POINT_PER_STAT, Math.floor(value)));
 }
 
-function clampIvValue(value: number): number {
-  if (!Number.isFinite(value)) return 31;
-  return Math.max(0, Math.min(31, Math.floor(value)));
-}
-
 function clampEvsTotal(evs: StatBlock, changedKey: keyof StatBlock): StatBlock {
   const next = { ...evs };
   let total = totalEvs(next);
@@ -268,7 +263,7 @@ function normalizePokemonInput(pokemon: Partial<PokemonInput>): PokemonInput {
     types: pokemon.types ?? [],
     stats: pokemon.stats ?? emptyStats(),
     evs,
-    ivs: pokemon.ivs ?? defaultIvs(),
+    ivs: defaultIvs(),
     nature: pokemon.nature ?? "serious",
     item: itemValue,
     moves: pokemon.moves ?? [],
@@ -283,6 +278,17 @@ function clampHitCount(value: number): number {
 
 function toPercentText(value: number): string {
   return `${value.toFixed(1)}%`;
+}
+
+function clampPercent(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, value));
+}
+
+function remainingPercentRangeText(minDamagePercent: number, maxDamagePercent: number): string {
+  const remainAtMinDamage = clampPercent(100 - minDamagePercent);
+  const remainAtMaxDamage = clampPercent(100 - maxDamagePercent);
+  return `${toPercentText(remainAtMaxDamage)} - ${toPercentText(remainAtMinDamage)}`;
 }
 
 function statNameJa(stat: "atk" | "def" | "spa" | "spd"): string {
@@ -1066,38 +1072,6 @@ function App() {
               </div>
             </div>
             <div className="stat-section">
-              <p className="stat-title">個体値</p>
-              <div className="stat-grid">
-                {([
-                  ["hp", "HP"],
-                  ["atk", "攻撃"],
-                  ["def", "防御"],
-                  ["spa", "特攻"],
-                  ["spd", "特防"],
-                  ["spe", "素早さ"],
-                ] as [keyof StatBlock, string][]).map(([key, label]) => (
-                  <div key={`${key}-iv`}>
-                    <label>{label}</label>
-                    <input
-                      type="number"
-                      min={0}
-                      max={31}
-                      value={attacker.ivs[key]}
-                      onChange={(e) =>
-                        setAttacker({
-                          ...attacker,
-                          ivs: {
-                            ...attacker.ivs,
-                            [key]: clampIvValue(Number(e.target.value)),
-                          },
-                        })
-                      }
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="stat-section">
               <p className="stat-title">実数値</p>
               <div className="stat-grid">
                 {([
@@ -1332,38 +1306,6 @@ function App() {
               </div>
             </div>
             <div className="stat-section">
-              <p className="stat-title">個体値</p>
-              <div className="stat-grid">
-                {([
-                  ["hp", "HP"],
-                  ["atk", "攻撃"],
-                  ["def", "防御"],
-                  ["spa", "特攻"],
-                  ["spd", "特防"],
-                  ["spe", "素早さ"],
-                ] as [keyof StatBlock, string][]).map(([key, label]) => (
-                  <div key={`${key}-iv`}>
-                    <label>{label}</label>
-                    <input
-                      type="number"
-                      min={0}
-                      max={31}
-                      value={defender.ivs[key]}
-                      onChange={(e) =>
-                        setDefender({
-                          ...defender,
-                          ivs: {
-                            ...defender.ivs,
-                            [key]: clampIvValue(Number(e.target.value)),
-                          },
-                        })
-                      }
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="stat-section">
               <p className="stat-title">実数値</p>
               <div className="stat-grid">
                 {([
@@ -1533,6 +1475,71 @@ function App() {
                   使用ステータス: {statNameJa(damageResult.usedStat)} / 
                   {statNameJa(damageResult.usedDef)} ・ 威力 {damageResult.basePower}
                 </p>
+                {damagePercent && (
+                  <div className="hp-visual">
+                    <div className="hp-visual-head">
+                      <strong>HPバー（1回）</strong>
+                      <span>
+                        {toPercentText(damagePercent.min)} - {toPercentText(damagePercent.max)}
+                      </span>
+                    </div>
+                    <div className="hp-bar">
+                      <div
+                        className="hp-bar-min"
+                        style={{ width: `${clampPercent(damagePercent.min)}%` }}
+                      />
+                      <div
+                        className="hp-bar-range"
+                        style={{
+                          left: `${clampPercent(damagePercent.min)}%`,
+                          width: `${Math.max(
+                            0,
+                            clampPercent(damagePercent.max) -
+                              clampPercent(damagePercent.min)
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                    <p className="hp-remaining">
+                      残HP: {remainingPercentRangeText(damagePercent.min, damagePercent.max)}
+                    </p>
+                  </div>
+                )}
+                {totalDamagePercent && (
+                  <div className="hp-visual">
+                    <div className="hp-visual-head">
+                      <strong>HPバー（{hitCount}回合計）</strong>
+                      <span>
+                        {toPercentText(totalDamagePercent.min)} -{" "}
+                        {toPercentText(totalDamagePercent.max)}
+                      </span>
+                    </div>
+                    <div className="hp-bar">
+                      <div
+                        className="hp-bar-min"
+                        style={{ width: `${clampPercent(totalDamagePercent.min)}%` }}
+                      />
+                      <div
+                        className="hp-bar-range"
+                        style={{
+                          left: `${clampPercent(totalDamagePercent.min)}%`,
+                          width: `${Math.max(
+                            0,
+                            clampPercent(totalDamagePercent.max) -
+                              clampPercent(totalDamagePercent.min)
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                    <p className="hp-remaining">
+                      残HP:{" "}
+                      {remainingPercentRangeText(
+                        totalDamagePercent.min,
+                        totalDamagePercent.max
+                      )}
+                    </p>
+                  </div>
+                )}
                 {latestSavedDamage && (
                   <>
                     <h3>保存済みダメージ（選択）</h3>
@@ -1596,6 +1603,43 @@ function App() {
                       <p className="hint">
                         合計HP割合は、防御側HPが保存時と現在で異なるため表示できません。
                       </p>
+                    )}
+                    {combinedDamagePercentWithSaved && (
+                      <div className="hp-visual">
+                        <div className="hp-visual-head">
+                          <strong>HPバー（保存済み＋今回 合計）</strong>
+                          <span>
+                            {toPercentText(combinedDamagePercentWithSaved.min)} -{" "}
+                            {toPercentText(combinedDamagePercentWithSaved.max)}
+                          </span>
+                        </div>
+                        <div className="hp-bar">
+                          <div
+                            className="hp-bar-min"
+                            style={{
+                              width: `${clampPercent(combinedDamagePercentWithSaved.min)}%`,
+                            }}
+                          />
+                          <div
+                            className="hp-bar-range"
+                            style={{
+                              left: `${clampPercent(combinedDamagePercentWithSaved.min)}%`,
+                              width: `${Math.max(
+                                0,
+                                clampPercent(combinedDamagePercentWithSaved.max) -
+                                  clampPercent(combinedDamagePercentWithSaved.min)
+                              )}%`,
+                            }}
+                          />
+                        </div>
+                        <p className="hp-remaining">
+                          残HP:{" "}
+                          {remainingPercentRangeText(
+                            combinedDamagePercentWithSaved.min,
+                            combinedDamagePercentWithSaved.max
+                          )}
+                        </p>
+                      </div>
                     )}
                     <div className="actions">
                       <button
@@ -1868,37 +1912,6 @@ function App() {
                           >
                             {preset.label}
                           </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="stat-section">
-                      <p className="stat-title">個体値</p>
-                      <div className="stat-grid">
-                        {([
-                          ["hp", "HP"],
-                          ["atk", "攻撃"],
-                          ["def", "防御"],
-                          ["spa", "特攻"],
-                          ["spd", "特防"],
-                          ["spe", "素早さ"],
-                        ] as [keyof StatBlock, string][]).map(([key, label]) => (
-                          <div key={`${key}-iv`}>
-                            <label>{label}</label>
-                            <input
-                              type="number"
-                              min={0}
-                              max={31}
-                              value={member.ivs[key]}
-                              onChange={(e) =>
-                                updatePartyMember(idx, {
-                                  ivs: {
-                                    ...member.ivs,
-                                    [key]: clampIvValue(Number(e.target.value)),
-                                  },
-                                })
-                              }
-                            />
-                          </div>
                         ))}
                       </div>
                     </div>
