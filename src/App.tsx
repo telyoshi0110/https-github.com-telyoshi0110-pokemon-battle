@@ -336,9 +336,11 @@ function toTypeEn(type: string): string {
 }
 
 function App() {
-  const [tab, setTab] = useState<"damage" | "party" | "log">("damage");
+  const [tab, setTab] = useState<"damage" | "party" | "register" | "log">("damage");
   const [attacker, setAttacker] = useState<PokemonInput>(emptyPokemon());
   const [defender, setDefender] = useState<PokemonInput>(emptyPokemon());
+  const [registerPokemon, setRegisterPokemon] = useState<PokemonInput>(emptyPokemon());
+  const [registerSaveLabel, setRegisterSaveLabel] = useState("");
   const [move, setMove] = useState<MoveInfo>(emptyMove());
   const [damageResult, setDamageResult] = useState<DamageResult | null>(null);
   const [hitCount, setHitCount] = useState(1);
@@ -458,6 +460,11 @@ function App() {
     () => new Set(attackerMoveOptions),
     [attackerMoveOptions]
   );
+  const registerMoveOptions = useMemo(
+    () => Array.from(new Set(registerPokemon.moves)).sort((a, b) => a.localeCompare(b, "ja")),
+    [registerPokemon.moves]
+  );
+  const registerEvTotal = useMemo(() => totalEvs(registerPokemon.evs), [registerPokemon.evs]);
   const DefenderHp = useMemo(() => Math.max(1, DefenderActual.hp), [DefenderActual.hp]);
   const damagePercent = useMemo(() => {
     if (!damageResult) return null;
@@ -728,6 +735,60 @@ function App() {
     void handleFetchPartyMember(index, member.name);
   };
 
+  const handleFetchRegisterPokemon = async (inputName?: string) => {
+    const name = inputName?.trim() ?? registerPokemon.name.trim();
+    if (!name) return;
+    setError(null);
+    setBusy("register");
+    try {
+      const fetched = await fetchPokemon(name);
+      const displayName = fetched.displayName?.trim() || fetched.name;
+      setRegisterPokemon((prev) => ({
+        ...prev,
+        name: displayName,
+        displayName,
+        types: fetched.types,
+        stats: fetched.stats,
+        moves: (fetched.moves ?? []).slice(0, PARTY_MOVE_SLOTS),
+      }));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleRegisterPokemonNameInput = (value: string) => {
+    setRegisterPokemon((prev) => ({ ...prev, name: value }));
+    if (pokemonOptionSet.has(value.trim())) {
+      void handleFetchRegisterPokemon(value);
+    }
+  };
+
+  const handleRegisterPokemonNameCommit = () => {
+    if (!registerPokemon.name.trim()) return;
+    void handleFetchRegisterPokemon(registerPokemon.name);
+  };
+
+  const updateRegisterPokemonMove = (slot: number, value: string) => {
+    setRegisterPokemon((prev) => {
+      const nextMoves = Array.from(
+        { length: PARTY_MOVE_SLOTS },
+        (_, i) => prev.moves[i] ?? ""
+      );
+      nextMoves[slot] = value;
+      return { ...prev, moves: nextMoves };
+    });
+  };
+
+  const handleRegisterSavedPokemon = () => {
+    savePokemonPreset(
+      { ...registerPokemon, moves: normalizeSelectedMoves(registerPokemon.moves) },
+      registerSaveLabel
+    );
+    setRegisterSaveLabel("");
+  };
+
   const deleteSavedPokemon = (savedId: string) => {
     setSavedPokemon((prev) => prev.filter((saved) => saved.id !== savedId));
   };
@@ -858,6 +919,12 @@ function App() {
           onClick={() => setTab("party")}
         >
           パーティ保存
+        </button>
+        <button
+          className={tab === "register" ? "active" : ""}
+          onClick={() => setTab("register")}
+        >
+          保存ポケモン登録
         </button>
         <button
           className={tab === "log" ? "active" : ""}
@@ -2063,6 +2130,211 @@ function App() {
                 </div>
               ))}
             </div>
+          </div>
+        </section>
+      )}
+
+      {tab === "register" && (
+        <section className="panel">
+          <datalist id="pokemon-name-options-register">
+            {pokemonOptions.map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
+          <div className="card wide">
+            <h2>保存ポケモン登録</h2>
+            <div className="field">
+              <label>ポケモン名（検索）</label>
+              <input
+                list="pokemon-name-options-register"
+                value={registerPokemon.name}
+                onChange={(e) => handleRegisterPokemonNameInput(e.target.value)}
+                onBlur={handleRegisterPokemonNameCommit}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleRegisterPokemonNameCommit();
+                  }
+                }}
+                placeholder="ピカチュウ"
+              />
+              <select
+                value={
+                  pokemonOptionSet.has(registerPokemon.name.trim())
+                    ? registerPokemon.name
+                    : ""
+                }
+                onChange={(e) => handleRegisterPokemonNameInput(e.target.value)}
+              >
+                <option value="">ドロップダウンから選択</option>
+                {pokemonOptions.map((name) => (
+                  <option key={`register-poke-${name}`} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label>保存ラベル（任意）</label>
+              <input
+                value={registerSaveLabel}
+                onChange={(e) => setRegisterSaveLabel(e.target.value)}
+                placeholder="例: 物理エース用"
+              />
+            </div>
+            <div className="inline-fields">
+              <div>
+                <label>性格</label>
+                <select
+                  value={registerPokemon.nature}
+                  onChange={(e) =>
+                    setRegisterPokemon((prev) => ({ ...prev, nature: e.target.value }))
+                  }
+                >
+                  {NATURE_OPTIONS.map((option) => (
+                    <option key={`register-nature-${option.value}`} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label>持ち物</label>
+                <select
+                  value={registerPokemon.item ?? ""}
+                  onChange={(e) =>
+                    setRegisterPokemon((prev) => ({ ...prev, item: e.target.value }))
+                  }
+                >
+                  <option value="">なし</option>
+                  {registerPokemon.item &&
+                    !ITEM_OPTIONS.some((option) => option.value === registerPokemon.item) && (
+                      <option value={registerPokemon.item}>
+                        カスタム: {registerPokemon.item}
+                      </option>
+                    )}
+                  {ITEM_OPTIONS.map((option) => (
+                    <option key={`register-item-${option.value}`} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="field">
+              <label>メモ</label>
+              <textarea
+                value={registerPokemon.notes ?? ""}
+                onChange={(e) =>
+                  setRegisterPokemon((prev) => ({ ...prev, notes: e.target.value }))
+                }
+                placeholder="調整意図や役割メモ"
+              />
+            </div>
+            <div className="stat-section">
+              <p className="stat-title">能力ポイント</p>
+              <div className="stat-grid">
+                {([
+                  ["hp", "HP"],
+                  ["atk", "攻撃"],
+                  ["def", "防御"],
+                  ["spa", "特攻"],
+                  ["spd", "特防"],
+                  ["spe", "素早さ"],
+                ] as [keyof StatBlock, string][]).map(([key, label]) => (
+                  <div key={`register-${key}-ev`}>
+                    <label>{label}</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={MAX_STAT_POINT_PER_STAT}
+                      step={1}
+                      value={registerPokemon.evs[key]}
+                      onChange={(e) =>
+                        setRegisterPokemon((prev) => {
+                          const next = {
+                            ...prev.evs,
+                            [key]: clampEvValue(Number(e.target.value)),
+                          };
+                          return { ...prev, evs: clampEvsTotal(next, key) };
+                        })
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+              <p className={registerEvTotal > MAX_STAT_POINT_TOTAL ? "ev-total warn" : "ev-total"}>
+                能力ポイント合計: {registerEvTotal} / {MAX_STAT_POINT_TOTAL}
+              </p>
+              {registerEvTotal > MAX_STAT_POINT_TOTAL && (
+                <p className="ev-warning">能力ポイントが66を超えています。</p>
+              )}
+              <div className="ev-actions">
+                <button
+                  className="ghost"
+                  onClick={() =>
+                    setRegisterPokemon((prev) => ({
+                      ...prev,
+                      evs: normalizeEvs(prev.evs),
+                    }))
+                  }
+                >
+                  自動調整（66）
+                </button>
+                {EV_PRESETS.map((preset) => (
+                  <button
+                    key={`register-preset-${preset.label}`}
+                    className="ghost"
+                    onClick={() =>
+                      setRegisterPokemon((prev) => ({
+                        ...prev,
+                        evs: applyEvPreset(preset.values),
+                      }))
+                    }
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="field">
+              <label>技選択（4枠）</label>
+              <div className="inline-fields">
+                {Array.from({ length: PARTY_MOVE_SLOTS }, (_, slot) => {
+                  const selectedMove = registerPokemon.moves[slot] ?? "";
+                  const selectValue = registerMoveOptions.includes(selectedMove)
+                    ? selectedMove
+                    : "";
+                  return (
+                    <div key={`register-move-${slot}`}>
+                      <label>技{slot + 1}</label>
+                      <select
+                        value={selectValue}
+                        onChange={(e) => updateRegisterPokemonMove(slot, e.target.value)}
+                        disabled={registerMoveOptions.length === 0}
+                      >
+                        <option value="">
+                          {registerMoveOptions.length === 0
+                            ? "ポケモン選択後に候補表示"
+                            : "ドロップダウンから選択"}
+                        </option>
+                        {registerMoveOptions.map((option) => (
+                          <option key={`register-move-option-${slot}-${option}`} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="actions">
+              <button className="primary" onClick={handleRegisterSavedPokemon}>
+                保存ポケモンとして登録
+              </button>
+            </div>
+            {busy === "register" && <p className="hint">登録用ポケモンを反映中...</p>}
           </div>
         </section>
       )}
